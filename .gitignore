@@ -1,0 +1,15 @@
+# Ignore Data
+*.tif
+*.tiff
+/data
+/train
+/val
+
+# Ignore System Files
+__pycache__/
+*.DS_Store
+.ipynb_checkpoints/
+
+# Ignore other models
+*.pth
+!best_model_n2v.pth
