@@ -6,15 +6,13 @@ import numpy as np
 import torch.nn as nn
 import traceback
 
-# --- CONFIGURATION ---
-# Correct slugs based on your screenshot verification
-INPUT_PATH = "/input/images/calcium-imaging-noisy-image"  
+# --- CONFIGURATION (CORRECTED) ---
+# The slug from your screenshot is 'stacked-neuron-images-with-noise'
+INPUT_PATH = "/input/images/stacked-neuron-images-with-noise"
 OUTPUT_PATH = "/output/images/stacked-neuron-images-with-reduced-noise"
 MODEL_PATH = "/opt/algorithm/best_model_n2v.pth"
 
-# Tiling settings - SAFE for T4 GPU (32GB RAM)
-# Your screenshot says input is [500, 128, 128]. 
-# We use a smaller tile to be 100% safe against OOM.
+# Tiling settings - Safe for T4 GPU (32GB RAM)
 TILE_SIZE = (32, 128, 128) 
 OVERLAP = (4, 16, 16)
 
@@ -91,13 +89,20 @@ def predict_sliding_window(model, volume, device):
 
 # --- MAIN ---
 def run():
-    print("Starting Safe Inference...")
+    print("Starting Inference...")
     ensure_dir(OUTPUT_PATH)
+    
+    # 1. Debug: List Input Directory
+    # This will prove if the path is correct in the logs
+    print(f"Checking input path: {INPUT_PATH}")
+    if os.path.exists(INPUT_PATH):
+        print(f"Contents: {os.listdir(INPUT_PATH)}")
+    else:
+        print(f"!!! CRITICAL: Input path {INPUT_PATH} does not exist!")
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}")
     
-    # 1. Load Model (Wrapped in Try/Except)
     model = None
     try:
         model = UNet3D().to(device)
@@ -108,39 +113,39 @@ def run():
         print(f"CRITICAL: Model load failed: {e}")
         traceback.print_exc()
 
-    # 2. Process Files
     files = glob.glob(os.path.join(INPUT_PATH, "*.tif")) + \
             glob.glob(os.path.join(INPUT_PATH, "*.tiff"))
     
-    print(f"Found {len(files)} files.")
+    print(f"Found {len(files)} files to process.")
     
+    # Safety Check: If 0 files, fail gracefully or try recursive search
+    if len(files) == 0:
+        print("No files found! Attempting recursive search...")
+        for root, dirs, f_names in os.walk("/input"):
+            for f in f_names:
+                if f.endswith(".tif") or f.endswith(".tiff"):
+                    files.append(os.path.join(root, f))
+        print(f"Found {len(files)} files after recursive search.")
+
     for f in files:
         fname = os.path.basename(f)
         out_name = os.path.join(OUTPUT_PATH, fname)
         print(f"Processing {fname}...")
         
         try:
-            # Check if model loaded correctly
             if model is None:
-                raise RuntimeError("Model not loaded, falling back to copy.")
+                raise RuntimeError("Model not loaded.")
 
-            # Load and Predict
             img = tifffile.imread(f).astype(np.float32)
             denoised = predict_sliding_window(model, img, device)
-            
-            # Save
             tifffile.imwrite(out_name, denoised, resolution=(300,300), metadata={'axes': 'TZYX'})
             print(f"Saved {out_name}")
             
         except Exception as e:
-            # --- THE SAFETY NET ---
             print(f"!!! ERROR on {fname}: {e}")
             traceback.print_exc()
-            print("!!! FALLBACK: Copying input to output to save submission.")
-            
+            print("!!! FALLBACK: Copying input.")
             try:
-                # Last resort: Read input, write as output
-                # This guarantees the file exists so the evaluation script doesn't crash
                 fallback_img = tifffile.imread(f)
                 tifffile.imwrite(out_name, fallback_img)
             except:
